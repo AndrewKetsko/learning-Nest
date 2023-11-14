@@ -1,24 +1,108 @@
-import { Test, TestingModule } from '@nestjs/testing';
+import { Test } from '@nestjs/testing';
+import { AppModule } from '../src/app.module';
 import { INestApplication } from '@nestjs/common';
-import * as request from 'supertest';
-import { AppModule } from './../src/app.module';
+import { ValidationPipe } from '@nestjs/common/pipes';
+import { PrismaService } from '../src/prisma/prisma.service';
+import * as pactum from 'pactum';
+import { AuthDto } from 'src/auth/dto/auth.dto';
 
-describe('AppController (e2e)', () => {
+describe('App e2e', () => {
   let app: INestApplication;
-
-  beforeEach(async () => {
-    const moduleFixture: TestingModule = await Test.createTestingModule({
+  let prisma: PrismaService;
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
-
-    app = moduleFixture.createNestApplication();
+    app = moduleRef.createNestApplication();
+    app.useGlobalPipes(
+      new ValidationPipe({
+        whitelist: true,
+      }),
+    );
     await app.init();
+    await app.listen(3333);
+    prisma = app.get(PrismaService);
+    await prisma.cleanDb();
+    pactum.request.setBaseUrl('http://localhost:3333');
   });
 
-  it('/ (GET)', () => {
-    return request(app.getHttpServer())
-      .get('/')
-      .expect(200)
-      .expect('Hello World!');
+  afterAll(() => {
+    app.close();
+  });
+
+  describe('Auth', () => {
+    const dto: AuthDto = { email: 'some@some.com', password: '123' };
+    describe('Signup', () => {
+      it('throw error if Signup with empty email', () => {
+        return pactum
+          .spec()
+          .post('/auth/signup')
+          .withBody({ password: dto.password })
+          .expectStatus(400);
+      });
+      it('throw error if Signup with empty password', () => {
+        return pactum
+          .spec()
+          .post('/auth/signup')
+          .withBody({ email: dto.email })
+          .expectStatus(400);
+      });
+      it('throw error if Signup with empty body', () => {
+        return pactum.spec().post('/auth/signup').expectStatus(400);
+      });
+      it('Signup', () => {
+        return pactum
+          .spec()
+          .post('/auth/signup')
+          .withBody(dto)
+          .expectStatus(201);
+      });
+    });
+    describe('Signin', () => {
+      it('throw error if Signin with empty email', () => {
+        return pactum
+          .spec()
+          .post('/auth/signin')
+          .withBody({ password: dto.password })
+          .expectStatus(400);
+      });
+      it('throw error if Signin with empty password', () => {
+        return pactum
+          .spec()
+          .post('/auth/signin')
+          .withBody({ email: dto.email })
+          .expectStatus(400);
+      });
+      it('throw error if Signin with empty body', () => {
+        return pactum.spec().post('/auth/signin').expectStatus(400);
+      });
+      it('Signin', () => {
+        return pactum
+          .spec()
+          .post('/auth/signin')
+          .withBody(dto)
+          .expectStatus(200)
+          .stores('userAt', 'access_token');
+      });
+    });
+  });
+  describe('User', () => {
+    describe('Get me', () => {
+      it('get current user', () => {
+        return pactum
+          .spec()
+          .get('/users/me')
+          .withHeaders({ Authorization: 'Bearer $S{userAt}' })
+          .expectStatus(200);
+      });
+    });
+    describe('Edit user', () => {});
+  });
+  describe('Bookmarks', () => {
+    describe('Create bookmark', () => {});
+    describe('Get all bookmarks', () => {});
+    describe('Get bookmark by ID', () => {});
+    describe('Edit bookmark', () => {});
+    describe('Delete bookmark', () => {});
   });
 });
